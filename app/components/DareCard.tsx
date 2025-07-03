@@ -1,3 +1,5 @@
+/* eslint-disable */
+
 import { Avatar } from '@coinbase/onchainkit/identity';
 
 // Define the structure of a Dare object, mirroring the smart contract

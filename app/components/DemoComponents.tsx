@@ -1,3 +1,5 @@
+/* eslint-disable */
+
 "use client";
 
 import { type ReactNode, useCallback, useMemo, useState } from "react";

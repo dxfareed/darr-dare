@@ -1,32 +1,137 @@
 'use client';
 
-import { useDares } from '@/app/hooks/useDares';
-import { DareCard } from '@/app/components/DareCard';
+import { useEffect, useState } from 'react';
+import { useWaitForTransactionReceipt, useWriteContract } from 'wagmi';
+import { parseEther } from 'viem';
+import { Avatar, Name } from '@coinbase/onchainkit/identity';
+import {
+  DARR_CONTRACT_ADDRESS,
+  DARR_ABI,
+  DEGEN_TOKEN_ADDRESS,
+  DEGEN_TOKEN_ABI,
+} from '../lib/constants';
+import { sdk } from '@farcaster/miniapp-sdk';
 
 export default function Home() {
-  const { dares, isLoading, error } = useDares();
+  const [user, setUser] = useState<any>(null);
+
+  // --- All your existing state hooks are correct ---
+  const [description, setDescription] = useState<string>('');
+  const [prizeAmount, setPrizeAmount] = useState<string>('100');
+  const [targetUser, setTargetUser] = useState<string>('');
+
+  const { writeContract: approve, data: approveHash } = useWriteContract();
+  const { writeContract: createDare, data: createDareHash } = useWriteContract();
+
+  const { isLoading: isApproving, isSuccess: isApproved } = useWaitForTransactionReceipt({ hash: approveHash });
+  const { isLoading: isCreatingDare, isSuccess: didCreateDare } = useWaitForTransactionReceipt({ hash: createDareHash });
+
+  // --- CORRECTED useEffect HOOK ---
+  // This hook now ensures the UI is ready before hiding the splash screen.
+  useEffect(() => {
+    if (!sdk) {
+      console.error('Farcaster Miniapp SDK not loaded');
+      return;
+    }
+
+    sdk.context
+      .then(ctx => {
+        console.log('Farcaster context loaded:', ctx);
+        // Set the user state so the UI can render with user data
+        setUser(ctx.user);
+
+        // NOW, tell the Farcaster client we are ready to be displayed.
+        sdk.actions.ready();
+        console.log('sdk.actions.ready() called AFTER context was set.');
+      })
+      .catch(err => {
+        console.error('Error loading Farcaster context:', err);
+        // Also call ready here to show an error state instead of getting stuck on the splash screen.
+        sdk.actions.ready();
+      });
+  }, []); // The empty dependency array ensures this runs only once.
+
+  // --- All your existing handler functions are correct ---
+  const handleApprove = async () => {
+    if (!prizeAmount) return alert('Please enter a prize amount.');
+    const amountToApprove = parseEther(prizeAmount);
+    approve({
+      address: DEGEN_TOKEN_ADDRESS,
+      abi: DEGEN_TOKEN_ABI,
+      functionName: 'approve',
+      args: [DARR_CONTRACT_ADDRESS, amountToApprove],
+    });
+  };
+
+  const handleCreateDare = async () => {
+    if (!description || !targetUser || !prizeAmount) return alert('Please fill out all fields.');
+    const prizeAmountInWei = parseEther(prizeAmount);
+    createDare({
+      address: DARR_CONTRACT_ADDRESS,
+      abi: DARR_ABI,
+      functionName: 'createDare',
+      args: [targetUser, DEGEN_TOKEN_ADDRESS, prizeAmountInWei, description],
+    });
+  };
+
+  // --- The rest of the JSX is also correct ---
+  // This loading state will now only be seen if the user context fails to load,
+  // but it will no longer "flash" on screen during normal operation because
+  // `ready()` is called after `setUser`.
+  if (!user) {
+    return (
+      <main className="flex min-h-screen flex-col items-center justify-center p-6 bg-gray-900 text-white">
+        <div className="w-full max-w-md text-center">
+          {/* The splash screen will be visible until the user is loaded. */}
+          {/* This content will likely not be seen by the user. */}
+        </div>
+      </main>
+    );
+  }
 
   return (
-    <main className="flex min-h-screen flex-col items-center p-4 sm:p-8 md:p-12 bg-gray-50 dark:bg-black">
-      <div className="z-10 w-full max-w-3xl items-center justify-between font-mono text-sm">
-        <h1 className="text-3xl font-bold text-center text-gray-900 dark:text-white mb-8">
-          Darr: The Onchain Dare Game
-        </h1>
-      </div>
+    <main className="flex min-h-screen flex-col items-center justify-center p-6 bg-gray-900 text-white">
+      <div className="w-full max-w-md bg-gray-800 rounded-2xl p-6 shadow-lg space-y-6">
+        <h1 className="text-2xl font-bold text-center">Onchain Dares</h1>
 
-      <div className="w-full max-w-3xl space-y-6">
-        {isLoading && <p className="text-center text-gray-500 dark:text-gray-400">Loading onchain dares...</p>}
-        {error && <p className="text-center text-red-500">Error fetching dares: {error.message}</p>}
-        
-        {!isLoading && !error && (
-          dares.length > 0 ? (
-            dares.map((dare) => <DareCard key={dare.id.toString()} dare={dare} />)
-          ) : (
-            <div className="text-center text-gray-500 dark:text-gray-400 p-8 border-2 border-dashed rounded-lg">
-              <p>No dares have been created yet.</p>
-              <p>Be the first to start the game!</p>
-            </div>
-          )
+        <div className="flex items-center space-x-3 bg-gray-700 p-3 rounded-lg">
+          <Avatar address={user.custodyAddress} className="w-12 h-12" />
+          <div className="flex flex-col">
+            <span className="text-sm text-gray-400">Darer (FID: {user?.fid})</span>
+            <Name address={user.custodyAddress} />
+          </div>
+        </div>
+
+        <div className="space-y-4">
+          <div>
+            <label htmlFor="description" className="block text-sm font-medium text-gray-300 mb-1">Dare Description</label>
+            <textarea id="description" value={description} onChange={(e) => setDescription(e.target.value)} placeholder="I dare @dwr to..." className="w-full bg-gray-900 border border-gray-600 rounded-md p-2 focus:ring-2 focus:ring-purple-500" rows={3}/>
+          </div>
+          <div>
+            <label htmlFor="target" className="block text-sm font-medium text-gray-300 mb-1">Target Address</label>
+            <input id="target" type="text" value={targetUser} onChange={(e) => setTargetUser(e.target.value)} placeholder="0x..." className="w-full bg-gray-900 border border-gray-600 rounded-md p-2 focus:ring-2 focus:ring-purple-500"/>
+          </div>
+          <div>
+            <label htmlFor="amount" className="block text-sm font-medium text-gray-300 mb-1">Prize Amount ($DEGEN)</label>
+            <input id="amount" type="number" value={prizeAmount} onChange={(e) => setPrizeAmount(e.target.value)} className="w-full bg-gray-900 border border-gray-600 rounded-md p-2 focus:ring-2 focus:ring-purple-500"/>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-2 gap-4">
+          <button onClick={handleApprove} disabled={isApproved || isApproving} className="w-full py-3 px-4 rounded-lg font-semibold text-white transition-all bg-purple-600 hover:bg-purple-700 disabled:bg-gray-600 disabled:cursor-not-allowed">
+            {isApproving ? 'Approving...' : isApproved ? '✓ Approved' : '1. Approve'}
+          </button>
+          
+          <button onClick={handleCreateDare} disabled={!isApproved || isCreatingDare} className="w-full py-3 px-4 rounded-lg font-semibold text-white transition-all bg-green-600 hover:bg-green-700 disabled:bg-gray-600 disabled:cursor-not-allowed">
+            {isCreatingDare ? 'Sending...' : didCreateDare ? 'Dare Sent!' : '2. Send Dare'}
+          </button>
+        </div>
+
+        {(approveHash || createDareHash) && (
+          <div className="text-center text-xs space-y-2 pt-4">
+            {approveHash && <p>Approval Tx: <a href={`https://basescan.org/tx/${approveHash}`} target="_blank" rel="noopener noreferrer" className="underline truncate">{approveHash.slice(0,15)}...</a></p>}
+            {createDareHash && <p>Dare Tx: <a href={`https://basescan.org/tx/${createDareHash}`} target="_blank" rel="noopener noreferrer" className="underline truncate">{createDareHash.slice(0,15)}...</a></p>}
+          </div>
         )}
       </div>
     </main>

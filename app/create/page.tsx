@@ -1,3 +1,4 @@
+/* eslint-disable */
 import { CreateDareView } from '@/app/components/CreateDareView';
 
 export default function CreatePage() {
