@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { useWaitForTransactionReceipt, useWriteContract } from 'wagmi';
+import { useAccount, useWaitForTransactionReceipt, useWriteContract } from 'wagmi';
 import { parseEther } from 'viem';
 import { Avatar, Name } from '@coinbase/onchainkit/identity';
 import {
@@ -12,47 +12,52 @@ import {
 } from '../lib/constants';
 import { sdk } from '@farcaster/miniapp-sdk';
 
-export default function Home() {
-  const [user, setUser] = useState<any>(null);
+// A clear type definition for the Farcaster user object from the SDK context
+type FarcasterUser = {
+  fid: number;
+  username?: string;
+  displayName?: string;
+  pfpUrl?: string;
+};
 
-  // --- All your existing state hooks are correct ---
+export default function Home() {
+  // --- STATE MANAGEMENT ---
+  // Get the reliable wallet address and connection status from wagmi
+  const { address, isConnected } = useAccount(); 
+  
+  // State specifically for Farcaster user data (FID, username, etc.)
+  const [farcasterUser, setFarcasterUser] = useState<FarcasterUser | null>(null);
+
+  // State for the form inputs
   const [description, setDescription] = useState<string>('');
   const [prizeAmount, setPrizeAmount] = useState<string>('100');
   const [targetUser, setTargetUser] = useState<string>('');
 
+  // --- WAGMI HOOKS for contract interaction ---
   const { writeContract: approve, data: approveHash } = useWriteContract();
   const { writeContract: createDare, data: createDareHash } = useWriteContract();
 
   const { isLoading: isApproving, isSuccess: isApproved } = useWaitForTransactionReceipt({ hash: approveHash });
   const { isLoading: isCreatingDare, isSuccess: didCreateDare } = useWaitForTransactionReceipt({ hash: createDareHash });
 
-  // --- CORRECTED useEffect HOOK ---
-  // This hook now ensures the UI is ready before hiding the splash screen.
+  // --- APP INITIALIZATION ---
   useEffect(() => {
-    if (!sdk) {
-      console.error('Farcaster Miniapp SDK not loaded');
-      return;
-    }
-
+    // CORRECTED: Access sdk.context as a promise directly.
     sdk.context
       .then(ctx => {
-        console.log('Farcaster context loaded:', ctx);
-        // Set the user state so the UI can render with user data
-        setUser(ctx.user);
-
-        // NOW, tell the Farcaster client we are ready to be displayed.
+        setFarcasterUser(ctx.user);
+        // CRITICAL: Call ready() AFTER context is fetched.
         sdk.actions.ready();
-        console.log('sdk.actions.ready() called AFTER context was set.');
       })
       .catch(err => {
-        console.error('Error loading Farcaster context:', err);
-        // Also call ready here to show an error state instead of getting stuck on the splash screen.
+        console.error("Error loading Farcaster context:", err);
+        // Still call ready() on error to prevent being stuck on the splash screen.
         sdk.actions.ready();
       });
   }, []); // The empty dependency array ensures this runs only once.
 
-  // --- All your existing handler functions are correct ---
-  const handleApprove = async () => {
+  // --- HANDLER FUNCTIONS ---
+  const handleApprove = () => {
     if (!prizeAmount) return alert('Please enter a prize amount.');
     const amountToApprove = parseEther(prizeAmount);
     approve({
@@ -63,7 +68,7 @@ export default function Home() {
     });
   };
 
-  const handleCreateDare = async () => {
+  const handleCreateDare = () => {
     if (!description || !targetUser || !prizeAmount) return alert('Please fill out all fields.');
     const prizeAmountInWei = parseEther(prizeAmount);
     createDare({
@@ -74,31 +79,29 @@ export default function Home() {
     });
   };
 
-  // --- The rest of the JSX is also correct ---
-  // This loading state will now only be seen if the user context fails to load,
-  // but it will no longer "flash" on screen during normal operation because
-  // `ready()` is called after `setUser`.
-  if (!user) {
+  // --- RENDER LOGIC ---
+  // Display a loading/connecting message until wagmi confirms the wallet is connected.
+  if (!isConnected || !address) {
     return (
       <main className="flex min-h-screen flex-col items-center justify-center p-6 bg-gray-900 text-white">
         <div className="w-full max-w-md text-center">
-          {/* The splash screen will be visible until the user is loaded. */}
-          {/* This content will likely not be seen by the user. */}
+            <p>Connecting to your Farcaster Wallet...</p>
         </div>
       </main>
     );
   }
 
+  // Once connected, render the main application UI.
   return (
     <main className="flex min-h-screen flex-col items-center justify-center p-6 bg-gray-900 text-white">
       <div className="w-full max-w-md bg-gray-800 rounded-2xl p-6 shadow-lg space-y-6">
         <h1 className="text-2xl font-bold text-center">Onchain Dares</h1>
 
         <div className="flex items-center space-x-3 bg-gray-700 p-3 rounded-lg">
-          <Avatar address={user.custodyAddress} className="w-12 h-12" />
+          <Avatar address={address} className="w-12 h-12" />
           <div className="flex flex-col">
-            <span className="text-sm text-gray-400">Darer (FID: {user?.fid})</span>
-            <Name address={user.custodyAddress} />
+            <span className="text-sm text-gray-400">Darer (FID: {farcasterUser?.fid ?? '...'})</span>
+            <Name address={address} />
           </div>
         </div>
 
@@ -118,19 +121,19 @@ export default function Home() {
         </div>
 
         <div className="grid grid-cols-2 gap-4">
-          <button onClick={handleApprove} disabled={isApproved || isApproving} className="w-full py-3 px-4 rounded-lg font-semibold text-white transition-all bg-purple-600 hover:bg-purple-700 disabled:bg-gray-600 disabled:cursor-not-allowed">
+          <button onClick={handleApprove} disabled={!isConnected || isApproved || isApproving} className="w-full py-3 px-4 rounded-lg font-semibold text-white transition-all bg-purple-600 hover:bg-purple-700 disabled:bg-gray-600 disabled:cursor-not-allowed">
             {isApproving ? 'Approving...' : isApproved ? '✓ Approved' : '1. Approve'}
           </button>
           
-          <button onClick={handleCreateDare} disabled={!isApproved || isCreatingDare} className="w-full py-3 px-4 rounded-lg font-semibold text-white transition-all bg-green-600 hover:bg-green-700 disabled:bg-gray-600 disabled:cursor-not-allowed">
+          <button onClick={handleCreateDare} disabled={!isConnected || !isApproved || isCreatingDare} className="w-full py-3 px-4 rounded-lg font-semibold text-white transition-all bg-green-600 hover:bg-green-700 disabled:bg-gray-600 disabled:cursor-not-allowed">
             {isCreatingDare ? 'Sending...' : didCreateDare ? 'Dare Sent!' : '2. Send Dare'}
           </button>
         </div>
 
         {(approveHash || createDareHash) && (
           <div className="text-center text-xs space-y-2 pt-4">
-            {approveHash && <p>Approval Tx: <a href={`https://basescan.org/tx/${approveHash}`} target="_blank" rel="noopener noreferrer" className="underline truncate">{approveHash.slice(0,15)}...</a></p>}
-            {createDareHash && <p>Dare Tx: <a href={`https://basescan.org/tx/${createDareHash}`} target="_blank" rel="noopener noreferrer" className="underline truncate">{createDareHash.slice(0,15)}...</a></p>}
+            {approveHash && <p>Approval Tx: <a href={`https://sepolia.basescan.org/tx/${approveHash}`} target="_blank" rel="noopener noreferrer" className="underline truncate">{approveHash.slice(0,15)}...</a></p>}
+            {createDareHash && <p>Dare Tx: <a href={`https://sepolia.basescan.org/tx/${createDareHash}`} target="_blank" rel="noopener noreferrer" className="underline truncate">{createDareHash.slice(0,15)}...</a></p>}
           </div>
         )}
       </div>
